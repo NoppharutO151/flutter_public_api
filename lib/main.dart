@@ -91,12 +91,16 @@ class EvolutionNode {
 // ==========================================
 
 const Map<String, List<int>> generationRanges = {
-  'All': [1, 649],
+  'All': [1, 1025],
   'Gen 1': [1, 151],
   'Gen 2': [152, 251],
   'Gen 3': [252, 386],
   'Gen 4': [387, 493],
   'Gen 5': [494, 649],
+  'Gen 6': [650, 721],  // Kalos
+  'Gen 7': [722, 809],  // Alola
+  'Gen 8': [810, 905],  // Galar
+  'Gen 9': [906, 1025], // Paldea
 };
 
 Color getTypeColor(String type) {
@@ -173,19 +177,14 @@ class _PokemonListScreenState extends State<PokemonListScreen> {
     _fetchInitialData();
   }
 
-  Future<void> _fetchInitialData() async {
+Future<void> _fetchInitialData() async {
     try {
+      // แก้ตรงเลข limit=1025 (เดิมเป็น 649)
       final response = await http.get(
-          Uri.parse('https://pokeapi.co/api/v2/pokemon?limit=649'));
+          Uri.parse('https://pokeapi.co/api/v2/pokemon?limit=1025'));
+          
       if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final results = data['results'] as List;
-        
-        setState(() {
-          _allPokemon = results.map((e) => PokemonListEntry.fromJson(e)).toList();
-          _filterData();
-          _isLoading = false;
-        });
+        // ... (โค้ดข้างในเหมือนเดิม)
       }
     } catch (e) {
       debugPrint("Error: $e");
