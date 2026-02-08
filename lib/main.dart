@@ -1,12 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 // ==========================================
-// 1. MODELS (โครงสร้างข้อมูล)
+// 1. MODELS
 // ==========================================
 
-// Model สำหรับ List (ข้อมูลเบื้องต้นแสดงหน้ารวม)
 class PokemonListEntry {
   final String name;
   final String url;
@@ -14,22 +14,21 @@ class PokemonListEntry {
 
   PokemonListEntry({required this.name, required this.url, required this.id});
 
-  factory PokemonListEntry.fromJson(Map<String, dynamic> json, int index) {
-    // ดึง ID จาก URL เพื่อความแม่นยำ
+  factory PokemonListEntry.fromJson(Map<String, dynamic> json) {
     final urlParts = json['url'].toString().split('/');
     final id = int.parse(urlParts[urlParts.length - 2]);
     return PokemonListEntry(name: json['name'], url: json['url'], id: id);
   }
 }
 
-// Model สำหรับ Detail (ข้อมูลเจาะลึก)
 class PokemonDetail {
   final int id;
   final String name;
   final int height;
   final int weight;
   final List<String> types;
-  final Map<String, int> stats; // hp, attack, defense, etc.
+  final Map<String, int> stats;
+  final String speciesUrl; // ใช้สำหรับหา Evolution
 
   PokemonDetail({
     required this.id,
@@ -38,6 +37,7 @@ class PokemonDetail {
     required this.weight,
     required this.types,
     required this.stats,
+    required this.speciesUrl,
   });
 
   factory PokemonDetail.fromJson(Map<String, dynamic> json) {
@@ -53,15 +53,43 @@ class PokemonDetail {
             s['stat']['name'].toString(),
             s['base_stat'] as int,
           ))),
+      speciesUrl: json['species']['url'],
+    );
+  }
+}
+
+// Model สำหรับข้อมูล Evolution
+class EvolutionNode {
+  final String speciesName;
+  final int speciesId;
+  final List<EvolutionNode> evolvesTo;
+
+  EvolutionNode({required this.speciesName, required this.speciesId, required this.evolvesTo});
+
+  // ฟังก์ชันแกะ JSON แบบ Recursive (เรียกตัวเองซ้ำๆ เพื่อหาร่างถัดไป)
+  factory EvolutionNode.fromJson(Map<String, dynamic> json) {
+    final speciesUrlParts = json['species']['url'].toString().split('/');
+    final id = int.parse(speciesUrlParts[speciesUrlParts.length - 2]);
+    
+    var evolvesTo = <EvolutionNode>[];
+    if (json['evolves_to'] != null) {
+      evolvesTo = (json['evolves_to'] as List)
+          .map((e) => EvolutionNode.fromJson(e))
+          .toList();
+    }
+
+    return EvolutionNode(
+      speciesName: json['species']['name'],
+      speciesId: id,
+      evolvesTo: evolvesTo,
     );
   }
 }
 
 // ==========================================
-// 2. CONSTANTS & HELPERS (ค่าคงที่และฟังก์ชันช่วย)
+// 2. CONSTANTS & HELPERS
 // ==========================================
 
-// ช่วง ID ของแต่ละ Gen
 const Map<String, List<int>> generationRanges = {
   'Gen 1': [1, 151],
   'Gen 2': [152, 251],
@@ -70,7 +98,6 @@ const Map<String, List<int>> generationRanges = {
   'Gen 5': [494, 649],
 };
 
-// เลือกสีตามธาตุ
 Color getTypeColor(String type) {
   switch (type) {
     case 'fire': return const Color(0xFFFA6C6C);
@@ -90,12 +117,12 @@ Color getTypeColor(String type) {
     case 'steel': return const Color(0xFFB8B8D0);
     case 'flying': return const Color(0xFFA98FF3);
     case 'dark': return const Color(0xFF705746);
-    default: return const Color(0xFFA8A878); // Normal
+    default: return const Color(0xFFA8A878);
   }
 }
 
 // ==========================================
-// 3. MAIN APP (จุดเริ่มต้นแอป)
+// 3. MAIN APP
 // ==========================================
 
 void main() {
@@ -108,13 +135,13 @@ class PokedexApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Pro Pokedex',
+      title: 'Ultimate Pokedex',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.redAccent),
         scaffoldBackgroundColor: const Color(0xFFF5F5F5),
-        fontFamily: 'Roboto', // ใช้ฟอนต์มาตรฐานให้อ่านง่าย
+        fontFamily: 'Roboto',
       ),
       home: const PokemonListScreen(),
     );
@@ -122,7 +149,7 @@ class PokedexApp extends StatelessWidget {
 }
 
 // ==========================================
-// 4. SCREEN 1: LIST SCREEN (หน้ารวม)
+// 4. HOME SCREEN
 // ==========================================
 
 class PokemonListScreen extends StatefulWidget {
@@ -145,10 +172,8 @@ class _PokemonListScreenState extends State<PokemonListScreen> {
     _fetchInitialData();
   }
 
-  // ดึงข้อมูลครั้งเดียว เก็บลง _allPokemon
   Future<void> _fetchInitialData() async {
     try {
-      // ดึงถึง Gen 5 (649 ตัว)
       final response = await http.get(
           Uri.parse('https://pokeapi.co/api/v2/pokemon?limit=649'));
       if (response.statusCode == 200) {
@@ -156,10 +181,8 @@ class _PokemonListScreenState extends State<PokemonListScreen> {
         final results = data['results'] as List;
         
         setState(() {
-          _allPokemon = results.asMap().entries.map((e) {
-            return PokemonListEntry.fromJson(e.value, e.key);
-          }).toList();
-          _filterData(); // กรองข้อมูลครั้งแรก
+          _allPokemon = results.map((e) => PokemonListEntry.fromJson(e)).toList();
+          _filterData();
           _isLoading = false;
         });
       }
@@ -168,7 +191,6 @@ class _PokemonListScreenState extends State<PokemonListScreen> {
     }
   }
 
-  // ฟังก์ชันกรองข้อมูล (Search + Gen Filter)
   void _filterData() {
     final range = generationRanges[_selectedGen]!;
     final query = _searchController.text.toLowerCase();
@@ -184,159 +206,83 @@ class _PokemonListScreenState extends State<PokemonListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Responsive Logic: เช็คความกว้างหน้าจอ
     double screenWidth = MediaQuery.of(context).size.width;
-    // PC (>600px) โชว์ 6 คอลัมน์, มือถือ โชว์ 3 คอลัมน์
     int crossAxisCount = screenWidth > 600 ? 6 : 3;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Pokedex', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1.5)),
+        title: const Text('Pokedex', style: TextStyle(fontWeight: FontWeight.w900)),
         centerTitle: true,
         backgroundColor: Colors.redAccent,
         foregroundColor: Colors.white,
-        elevation: 0,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
-        ),
       ),
       body: Column(
         children: [
-          // 1. Search Bar
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 20, 16, 10),
-            child: TextField(
-              controller: _searchController,
-              onChanged: (value) => _filterData(),
-              decoration: InputDecoration(
-                hintText: 'Search for a Pokémon by name...',
-                prefixIcon: const Icon(Icons.search, color: Colors.redAccent),
-                filled: true,
-                fillColor: Colors.white,
-                contentPadding: const EdgeInsets.symmetric(vertical: 0),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(30),
-                  borderSide: BorderSide.none,
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(30),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
-              ),
-            ),
-          ),
-
-          // 2. Gen Filter Chips
-          SizedBox(
-            height: 50,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              children: generationRanges.keys.map((gen) {
-                final isSelected = _selectedGen == gen;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: Text(gen),
-                    selected: isSelected,
-                    onSelected: (bool selected) {
-                      if (selected) {
-                        setState(() {
-                          _selectedGen = gen;
-                          _searchController.clear();
-                          _filterData();
-                        });
-                      }
-                    },
-                    selectedColor: Colors.redAccent,
-                    labelStyle: TextStyle(
-                      color: isSelected ? Colors.white : Colors.black87,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                    ),
-                    backgroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          // Filter & Search
+          Container(
+            padding: const EdgeInsets.all(16),
+            color: Colors.redAccent,
+            child: Column(
+              children: [
+                TextField(
+                  controller: _searchController,
+                  onChanged: (value) => _filterData(),
+                  decoration: InputDecoration(
+                    hintText: 'Search...',
+                    prefixIcon: const Icon(Icons.search),
+                    filled: true,
+                    fillColor: Colors.white,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide.none),
+                    contentPadding: EdgeInsets.zero,
                   ),
-                );
-              }).toList(),
+                ),
+                const SizedBox(height: 10),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: generationRanges.keys.map((gen) {
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: ChoiceChip(
+                          label: Text(gen),
+                          selected: _selectedGen == gen,
+                          onSelected: (bool selected) {
+                            if (selected) {
+                              setState(() {
+                                _selectedGen = gen;
+                                _searchController.clear();
+                                _filterData();
+                              });
+                            }
+                          },
+                          selectedColor: Colors.white,
+                          backgroundColor: Colors.redAccent.shade200,
+                          labelStyle: TextStyle(color: _selectedGen == gen ? Colors.red : Colors.white),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide.none),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                )
+              ],
             ),
           ),
-
-          const SizedBox(height: 10),
-
-          // 3. Grid View
+          
+          // Grid
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
-                : _filteredPokemon.isEmpty 
-                  ? const Center(child: Text("ไม่พบ Pokemon ที่ค้นหา"))
-                  : GridView.builder(
+                : GridView.builder(
                     padding: const EdgeInsets.all(12),
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: crossAxisCount,
-                      childAspectRatio: 0.75, // สัดส่วนสูงกว่ากว้าง (แนวตั้ง)
+                      childAspectRatio: 0.7, // เพิ่มความสูงให้ใส่ Type ได้
                       crossAxisSpacing: 10,
                       mainAxisSpacing: 10,
                     ),
                     itemCount: _filteredPokemon.length,
                     itemBuilder: (context, index) {
-                      final pokemon = _filteredPokemon[index];
-                      // ใช้รูป Official Artwork
-                      final imageUrl = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${pokemon.id}.png';
-
-                      return GestureDetector(
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => PokemonDetailScreen(pokemonEntry: pokemon),
-                            ),
-                          );
-                        },
-                        child: Card(
-                          elevation: 2,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                          color: Colors.white,
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              // Hero Animation: เชื่อมรูปภาพไปหน้าถัดไป
-                              Expanded(
-                                flex: 3,
-                                child: Hero(
-                                  tag: 'pokemon-img-${pokemon.id}',
-                                  child: Image.network(
-                                    imageUrl, 
-                                    fit: BoxFit.contain,
-                                    errorBuilder: (c,e,s) => const Icon(Icons.broken_image, color: Colors.grey),
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                flex: 1,
-                                child: Column(
-                                  children: [
-                                    Text(
-                                      pokemon.name.toUpperCase(),
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: screenWidth > 600 ? 14 : 11, // ปรับขนาดฟอนต์
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    Text(
-                                      '#${pokemon.id.toString().padLeft(3, '0')}',
-                                      style: TextStyle(
-                                        color: Colors.grey,
-                                        fontSize: screenWidth > 600 ? 12 : 10,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
+                      return PokemonCard(pokemon: _filteredPokemon[index], screenWidth: screenWidth);
                     },
                   ),
           ),
@@ -347,7 +293,116 @@ class _PokemonListScreenState extends State<PokemonListScreen> {
 }
 
 // ==========================================
-// 5. SCREEN 2: DETAIL SCREEN (หน้าแสดงรายละเอียด)
+// 5. POKEMON CARD (With Type Fetching)
+// ==========================================
+
+class PokemonCard extends StatefulWidget {
+  final PokemonListEntry pokemon;
+  final double screenWidth;
+
+  const PokemonCard({super.key, required this.pokemon, required this.screenWidth});
+
+  @override
+  State<PokemonCard> createState() => _PokemonCardState();
+}
+
+class _PokemonCardState extends State<PokemonCard> {
+  List<String>? _types; // เก็บ Type ของตัวนี้
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchTypes(); // ดึงข้อมูล Type แยกต่างหากเมื่อการ์ดถูกสร้าง
+  }
+
+  Future<void> _fetchTypes() async {
+    try {
+      final response = await http.get(Uri.parse(widget.pokemon.url));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (mounted) {
+          setState(() {
+            _types = (data['types'] as List)
+                .map((t) => t['type']['name'].toString())
+                .toList();
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final imageUrl = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${widget.pokemon.id}.png';
+
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(context, MaterialPageRoute(
+            builder: (context) => PokemonDetailScreen(pokemonEntry: widget.pokemon),
+        ));
+      },
+      child: Card(
+        elevation: 3,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        color: Colors.white,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Expanded(
+              flex: 3,
+              child: Hero(
+                tag: 'pokemon-img-${widget.pokemon.id}',
+                child: Image.network(imageUrl, fit: BoxFit.contain),
+              ),
+            ),
+            Expanded(
+              flex: 2,
+              child: Column(
+                children: [
+                  Text(
+                    widget.pokemon.name.toUpperCase(),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: widget.screenWidth > 600 ? 14 : 11,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    '#${widget.pokemon.id.toString().padLeft(3, '0')}',
+                    style: TextStyle(color: Colors.grey, fontSize: 10),
+                  ),
+                  const SizedBox(height: 4),
+                  // แสดง Types ที่ดึงมา
+                  if (_types != null)
+                    Wrap(
+                      spacing: 4,
+                      alignment: WrapAlignment.center,
+                      children: _types!.map((type) => Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: getTypeColor(type),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          type.toUpperCase(),
+                          style: const TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.bold),
+                        ),
+                      )).toList(),
+                    )
+                  else
+                    const SizedBox(height: 10, width: 10, child: CircularProgressIndicator(strokeWidth: 2)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// 6. DETAIL SCREEN (With Evolutions & Matchups)
 // ==========================================
 
 class PokemonDetailScreen extends StatefulWidget {
@@ -360,197 +415,258 @@ class PokemonDetailScreen extends StatefulWidget {
 }
 
 class _PokemonDetailScreenState extends State<PokemonDetailScreen> {
-  late Future<PokemonDetail> _detailFuture;
+  late Future<Map<String, dynamic>> _fullDataFuture;
 
   @override
   void initState() {
     super.initState();
-    _detailFuture = _fetchPokemonDetail();
+    _fullDataFuture = _fetchAllData();
   }
 
-  Future<PokemonDetail> _fetchPokemonDetail() async {
-    final response = await http.get(Uri.parse(widget.pokemonEntry.url));
-    if (response.statusCode == 200) {
-      return PokemonDetail.fromJson(json.decode(response.body));
-    } else {
-      throw Exception('Failed to load detail');
+  // รวมการดึงข้อมูลทั้งหมด: Detail -> Species -> Evolution -> Type Weakness
+  Future<Map<String, dynamic>> _fetchAllData() async {
+    // 1. Fetch Basic Detail
+    final detailResp = await http.get(Uri.parse(widget.pokemonEntry.url));
+    final detailJson = json.decode(detailResp.body);
+    final detail = PokemonDetail.fromJson(detailJson);
+
+    // 2. Fetch Species (เพื่อเอา Evolution URL)
+    final speciesResp = await http.get(Uri.parse(detail.speciesUrl));
+    final speciesJson = json.decode(speciesResp.body);
+    final evolutionUrl = speciesJson['evolution_chain']['url'];
+
+    // 3. Fetch Evolution Chain
+    final evoResp = await http.get(Uri.parse(evolutionUrl));
+    final evoJson = json.decode(evoResp.body);
+    final evolutionChain = EvolutionNode.fromJson(evoJson['chain']);
+
+    // 4. Fetch Type Effectiveness (Matchups)
+    // ดึงข้อมูลความสัมพันธ์ของธาตุตัวนี้
+    List<String> weaknesses = [];
+    List<String> strengths = [];
+    
+    for (String type in detail.types) {
+      final typeResp = await http.get(Uri.parse('https://pokeapi.co/api/v2/type/$type'));
+      final typeJson = json.decode(typeResp.body);
+      
+      // แพ้ทาง (Double damage from)
+      (typeJson['damage_relations']['double_damage_from'] as List).forEach((e) {
+        String t = e['name'];
+        if (!weaknesses.contains(t)) weaknesses.add(t);
+      });
+
+      // ชนะทาง (Double damage to)
+      (typeJson['damage_relations']['double_damage_to'] as List).forEach((e) {
+        String t = e['name'];
+        if (!strengths.contains(t)) strengths.add(t);
+      });
     }
+
+    return {
+      'detail': detail,
+      'evolution': evolutionChain,
+      'weaknesses': weaknesses,
+      'strengths': strengths,
+    };
+  }
+
+  // ฟังก์ชันแปลง Evolution Tree ให้เป็น List แนวราบเพื่อแสดงผลง่ายๆ
+  List<EvolutionNode> _flattenEvolution(EvolutionNode node) {
+    List<EvolutionNode> list = [node];
+    for (var child in node.evolvesTo) {
+      list.addAll(_flattenEvolution(child));
+    }
+    return list;
   }
 
   @override
   Widget build(BuildContext context) {
-    final imageUrl = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${widget.pokemonEntry.id}.png';
-
     return Scaffold(
       backgroundColor: Colors.white,
-      body: FutureBuilder<PokemonDetail>(
-        future: _detailFuture,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: const BackButton(color: Colors.black),
+      ),
+      body: FutureBuilder<Map<String, dynamic>>(
+        future: _fullDataFuture,
         builder: (context, snapshot) {
-          // กรณีโหลดอยู่: แสดง Loading แต่ยังโชว์สีพื้นหลังและรูป Hero ได้ (ถ้าออกแบบเพิ่ม)
-          // แต่เพื่อความง่าย เราใช้ CircularProgressIndicator ก่อน
           if (snapshot.connectionState == ConnectionState.waiting) {
-             return const Center(child: CircularProgressIndicator());
-          } 
-          
-          if (snapshot.hasError) {
-             return Center(child: Text("Error: ${snapshot.error}"));
+            return const Center(child: CircularProgressIndicator());
           }
+          if (snapshot.hasError) {
+            return Center(child: Text('Error: ${snapshot.error}'));
+          }
+          if (!snapshot.hasData) return const SizedBox();
 
-          if (snapshot.hasData) {
-            final detail = snapshot.data!;
-            Color primaryColor = getTypeColor(detail.types.first);
+          final PokemonDetail detail = snapshot.data!['detail'];
+          final EvolutionNode evoRoot = snapshot.data!['evolution'];
+          final List<String> weaknesses = snapshot.data!['weaknesses'];
+          final List<String> strengths = snapshot.data!['strengths'];
 
-            return CustomScrollView(
-              slivers: [
-                // ส่วนหัว AppBar + รูปภาพ (SliverAppBar)
-                SliverAppBar(
-                  expandedHeight: 300,
-                  backgroundColor: primaryColor,
-                  pinned: true,
-                  flexibleSpace: FlexibleSpaceBar(
-                    background: Container(
-                      color: primaryColor,
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          // วงกลมตกแต่งด้านหลัง
-                          Positioned(
-                            top: -50,
-                            right: -50,
-                            child: CircleAvatar(
-                              radius: 130,
-                              backgroundColor: Colors.white.withOpacity(0.2),
-                            ),
-                          ),
-                          Positioned(
-                            bottom: 20,
-                            child: Hero(
-                              tag: 'pokemon-img-${widget.pokemonEntry.id}',
-                              child: Image.network(imageUrl, height: 200),
-                            ),
-                          ),
-                        ],
+          final primaryColor = getTypeColor(detail.types.first);
+
+          return SingleChildScrollView(
+            child: Column(
+              children: [
+                // --- Header Image ---
+                SizedBox(
+                  height: 250,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Container(
+                        decoration: BoxDecoration(
+                          color: primaryColor.withOpacity(0.1),
+                          borderRadius: const BorderRadius.vertical(bottom: Radius.circular(100)),
+                        ),
                       ),
-                    ),
+                      Hero(
+                        tag: 'pokemon-img-${detail.id}',
+                        child: Image.network(
+                          'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${detail.id}.png',
+                          height: 200,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 
-                // ส่วนเนื้อหาด้านล่าง
-                SliverToBoxAdapter(
-                  child: Container(
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-                    ),
-                    transform: Matrix4.translationValues(0.0, -20.0, 0.0), // ดันขึ้นไปทับ AppBar นิดหน่อย
-                    child: Padding(
-                      padding: const EdgeInsets.all(24.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // ชื่อและประเภท
-                          Center(
-                            child: Column(
-                              children: [
-                                Text(
-                                  detail.name.toUpperCase(),
-                                  style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
-                                ),
-                                const SizedBox(height: 10),
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: detail.types.map((type) => Container(
-                                    margin: const EdgeInsets.symmetric(horizontal: 5),
-                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                                    decoration: BoxDecoration(
-                                      color: getTypeColor(type),
-                                      borderRadius: BorderRadius.circular(20),
-                                    ),
-                                    child: Text(
-                                      type.toUpperCase(),
-                                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                                    ),
-                                  )).toList(),
-                                ),
-                              ],
-                            ),
-                          ),
-                          
-                          const SizedBox(height: 30),
-                          
-                          // ขนาดตัว (Height / Weight)
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              _buildAttributeColumn('Weight', '${detail.weight / 10} kg', Icons.fitness_center),
-                              _buildAttributeColumn('Height', '${detail.height / 10} m', Icons.height),
-                            ],
-                          ),
-
-                          const SizedBox(height: 30),
-                          const Text("Base Stats", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 15),
-                          
-                          // กราฟพลัง
-                          ...detail.stats.entries.map((entry) {
-                            return _buildStatRow(entry.key, entry.value, primaryColor);
-                          }),
-                        ],
+                Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Text(detail.name.toUpperCase(), style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: primaryColor)),
+                      const SizedBox(height: 10),
+                      
+                      // --- Types ---
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: detail.types.map((type) => Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 5),
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                          decoration: BoxDecoration(color: getTypeColor(type), borderRadius: BorderRadius.circular(20)),
+                          child: Text(type.toUpperCase(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        )).toList(),
                       ),
-                    ),
+                      const SizedBox(height: 30),
+
+                      // --- Matchups (Winning/Losing) ---
+                      _buildSectionTitle("Type Effectiveness"),
+                      const SizedBox(height: 10),
+                      _buildMatchupRow("Weak Against (แพ้ทาง)", weaknesses, Colors.red.shade100),
+                      const SizedBox(height: 10),
+                      _buildMatchupRow("Strong Against (ชนะทาง)", strengths, Colors.green.shade100),
+
+                      const SizedBox(height: 30),
+
+                      // --- Evolutions ---
+                      _buildSectionTitle("Evolution Chain"),
+                      const SizedBox(height: 15),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: _flattenEvolution(evoRoot).map((node) {
+                            bool isCurrent = node.speciesId == detail.id;
+                            return Row(
+                              children: [
+                                Column(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(10),
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        border: isCurrent ? Border.all(color: primaryColor, width: 3) : null,
+                                        color: Colors.grey.shade100,
+                                      ),
+                                      child: Image.network(
+                                        'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${node.speciesId}.png',
+                                        width: 60,
+                                        height: 60,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 5),
+                                    Text(node.speciesName, style: TextStyle(fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal)),
+                                  ],
+                                ),
+                                // Arrow Logic
+                                if (node.evolvesTo.isNotEmpty) 
+                                  const Padding(
+                                    padding: EdgeInsets.symmetric(horizontal: 10),
+                                    child: Icon(Icons.arrow_forward, color: Colors.grey),
+                                  ),
+                              ],
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                      
+                      const SizedBox(height: 30),
+
+                      // --- Stats ---
+                      _buildSectionTitle("Base Stats"),
+                      ...detail.stats.entries.map((e) => Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 5),
+                        child: Row(
+                          children: [
+                            SizedBox(width: 80, child: Text(e.key.toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey))),
+                            SizedBox(width: 40, child: Text('${e.value}', style: const TextStyle(fontWeight: FontWeight.bold))),
+                            Expanded(
+                              child: LinearProgressIndicator(
+                                value: e.value / 150,
+                                color: primaryColor,
+                                backgroundColor: Colors.grey.shade200,
+                                minHeight: 8,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                            ),
+                          ],
+                        ),
+                      )),
+                    ],
                   ),
                 ),
               ],
-            );
-          }
-          return const SizedBox();
+            ),
+          );
         },
       ),
     );
   }
 
-  Widget _buildAttributeColumn(String label, String value, IconData icon) {
-    return Column(
-      children: [
-        Icon(icon, color: Colors.grey[400]),
-        const SizedBox(height: 5),
-        Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-        Text(label, style: const TextStyle(color: Colors.grey)),
-      ],
+  Widget _buildSectionTitle(String title) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
     );
   }
 
-  Widget _buildStatRow(String label, int value, Color color) {
-    // แปลงชื่อ Stat ย่อๆ
-    String shortLabel = label;
-    if (label == 'special-attack') shortLabel = 'Sp. Atk';
-    if (label == 'special-defense') shortLabel = 'Sp. Def';
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
+  Widget _buildMatchupRow(String label, List<String> types, Color bgColor) {
+    if (types.isEmpty) return const SizedBox.shrink();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 70,
-            child: Text(
-              shortLabel.toUpperCase(),
-              style: TextStyle(color: Colors.grey[600], fontWeight: FontWeight.bold, fontSize: 12),
-            ),
-          ),
-          SizedBox(
-            width: 30,
-            child: Text('$value', style: const TextStyle(fontWeight: FontWeight.bold)),
-          ),
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: LinearProgressIndicator(
-                value: value / 150, // เทียบกับค่า Max ประมาณ 150
-                backgroundColor: Colors.grey[200],
-                color: color,
-                minHeight: 10,
+          Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: types.map((type) => Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: getTypeColor(type),
+                borderRadius: BorderRadius.circular(5),
               ),
-            ),
+              child: Text(type.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+            )).toList(),
           ),
         ],
       ),
