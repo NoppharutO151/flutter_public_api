@@ -28,7 +28,7 @@ class PokemonDetail {
   final int weight;
   final List<String> types;
   final Map<String, int> stats;
-  final String speciesUrl; // ใช้สำหรับหา Evolution
+  final String speciesUrl;
 
   PokemonDetail({
     required this.id,
@@ -58,7 +58,6 @@ class PokemonDetail {
   }
 }
 
-// Model สำหรับข้อมูล Evolution
 class EvolutionNode {
   final String speciesName;
   final int speciesId;
@@ -66,7 +65,6 @@ class EvolutionNode {
 
   EvolutionNode({required this.speciesName, required this.speciesId, required this.evolvesTo});
 
-  // ฟังก์ชันแกะ JSON แบบ Recursive (เรียกตัวเองซ้ำๆ เพื่อหาร่างถัดไป)
   factory EvolutionNode.fromJson(Map<String, dynamic> json) {
     final speciesUrlParts = json['species']['url'].toString().split('/');
     final id = int.parse(speciesUrlParts[speciesUrlParts.length - 2]);
@@ -87,7 +85,7 @@ class EvolutionNode {
 }
 
 // ==========================================
-// 2. CONSTANTS & HELPERS
+// 2. CONSTANTS & HELPERS (Updated Gen 6-9)
 // ==========================================
 
 const Map<String, List<int>> generationRanges = {
@@ -95,8 +93,8 @@ const Map<String, List<int>> generationRanges = {
   'Gen 1': [1, 151],
   'Gen 2': [152, 251],
   'Gen 3': [252, 386],
-  'Gen 4': [387, 493],
-  'Gen 5': [494, 649],
+  'Gen 4': [387, 494],
+  'Gen 5': [495, 649],
   'Gen 6': [650, 721],  // Kalos
   'Gen 7': [722, 809],  // Alola
   'Gen 8': [810, 905],  // Galar
@@ -168,7 +166,7 @@ class _PokemonListScreenState extends State<PokemonListScreen> {
   List<PokemonListEntry> _allPokemon = [];
   List<PokemonListEntry> _filteredPokemon = [];
   bool _isLoading = true;
-  String _selectedGen = 'Gen 1';
+  String _selectedGen = 'All';
   final TextEditingController _searchController = TextEditingController();
 
   @override
@@ -177,14 +175,20 @@ class _PokemonListScreenState extends State<PokemonListScreen> {
     _fetchInitialData();
   }
 
-Future<void> _fetchInitialData() async {
+  // อัปเดต Limit เป็น 1025 เพื่อดึงข้อมูลถึง Gen 9
+  Future<void> _fetchInitialData() async {
     try {
-      // แก้ตรงเลข limit=1025 (เดิมเป็น 649)
       final response = await http.get(
           Uri.parse('https://pokeapi.co/api/v2/pokemon?limit=1025'));
-          
       if (response.statusCode == 200) {
-        // ... (โค้ดข้างในเหมือนเดิม)
+        final data = json.decode(response.body);
+        final results = data['results'] as List;
+        
+        setState(() {
+          _allPokemon = results.map((e) => PokemonListEntry.fromJson(e)).toList();
+          _filterData();
+          _isLoading = false;
+        });
       }
     } catch (e) {
       debugPrint("Error: $e");
@@ -276,7 +280,7 @@ Future<void> _fetchInitialData() async {
                     padding: const EdgeInsets.all(12),
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: crossAxisCount,
-                      childAspectRatio: 0.7, // เพิ่มความสูงให้ใส่ Type ได้
+                      childAspectRatio: 0.7,
                       crossAxisSpacing: 10,
                       mainAxisSpacing: 10,
                     ),
@@ -307,12 +311,12 @@ class PokemonCard extends StatefulWidget {
 }
 
 class _PokemonCardState extends State<PokemonCard> {
-  List<String>? _types; // เก็บ Type ของตัวนี้
+  List<String>? _types; 
 
   @override
   void initState() {
     super.initState();
-    _fetchTypes(); // ดึงข้อมูล Type แยกต่างหากเมื่อการ์ดถูกสร้าง
+    _fetchTypes();
   }
 
   Future<void> _fetchTypes() async {
@@ -372,7 +376,6 @@ class _PokemonCardState extends State<PokemonCard> {
                     style: TextStyle(color: Colors.grey, fontSize: 10),
                   ),
                   const SizedBox(height: 4),
-                  // แสดง Types ที่ดึงมา
                   if (_types != null)
                     Wrap(
                       spacing: 4,
@@ -423,7 +426,6 @@ class _PokemonDetailScreenState extends State<PokemonDetailScreen> {
     _fullDataFuture = _fetchAllData();
   }
 
-  // รวมการดึงข้อมูลทั้งหมด: Detail -> Species -> Evolution -> Type Weakness
   Future<Map<String, dynamic>> _fetchAllData() async {
     // 1. Fetch Basic Detail
     final detailResp = await http.get(Uri.parse(widget.pokemonEntry.url));
@@ -441,7 +443,6 @@ class _PokemonDetailScreenState extends State<PokemonDetailScreen> {
     final evolutionChain = EvolutionNode.fromJson(evoJson['chain']);
 
     // 4. Fetch Type Effectiveness (Matchups)
-    // ดึงข้อมูลความสัมพันธ์ของธาตุตัวนี้
     List<String> weaknesses = [];
     List<String> strengths = [];
     
@@ -449,13 +450,11 @@ class _PokemonDetailScreenState extends State<PokemonDetailScreen> {
       final typeResp = await http.get(Uri.parse('https://pokeapi.co/api/v2/type/$type'));
       final typeJson = json.decode(typeResp.body);
       
-      // แพ้ทาง (Double damage from)
       (typeJson['damage_relations']['double_damage_from'] as List).forEach((e) {
         String t = e['name'];
         if (!weaknesses.contains(t)) weaknesses.add(t);
       });
 
-      // ชนะทาง (Double damage to)
       (typeJson['damage_relations']['double_damage_to'] as List).forEach((e) {
         String t = e['name'];
         if (!strengths.contains(t)) strengths.add(t);
@@ -470,7 +469,6 @@ class _PokemonDetailScreenState extends State<PokemonDetailScreen> {
     };
   }
 
-  // ฟังก์ชันแปลง Evolution Tree ให้เป็น List แนวราบเพื่อแสดงผลง่ายๆ
   List<EvolutionNode> _flattenEvolution(EvolutionNode node) {
     List<EvolutionNode> list = [node];
     for (var child in node.evolvesTo) {
@@ -590,7 +588,6 @@ class _PokemonDetailScreenState extends State<PokemonDetailScreen> {
                                     Text(node.speciesName, style: TextStyle(fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal)),
                                   ],
                                 ),
-                                // Arrow Logic
                                 if (node.evolvesTo.isNotEmpty) 
                                   const Padding(
                                     padding: EdgeInsets.symmetric(horizontal: 10),
