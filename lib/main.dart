@@ -91,6 +91,7 @@ class EvolutionNode {
 // ==========================================
 
 const Map<String, List<int>> generationRanges = {
+  'All': [1, 649],
   'Gen 1': [1, 151],
   'Gen 2': [152, 251],
   'Gen 3': [252, 386],
